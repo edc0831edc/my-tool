@@ -2,48 +2,47 @@ import streamlit as st
 import pandas as pd
 import re
 
-st.set_page_config(page_title="QECM 精準解析器", layout="wide")
-st.title("🤖 QECM Log 軸圈數自動解析工具")
+st.set_page_config(page_title="QECM 軸圈數精準解析", layout="wide")
+st.title("🤖 QECM Log 軸圈數精準解析器")
 
-uploaded_file = st.file_uploader("請上傳您的 .log 檔案", type=["log", "txt"])
+uploaded_file = st.file_uploader("請上傳 QECM Log 檔案", type=["log", "txt"])
 
 if uploaded_file:
-    # 讀取 Log 並按行拆分
+    # 讀取 Log 檔案
     content = uploaded_file.read().decode("utf-8")
-    lines = content.splitlines()
+    lines = content.split('\n')
 
-    # 存放結果的字典：{軸號: HEX值}
-    results = {}
-    
-    # 精準匹配規則：尋找包含關鍵字 2100,00,1814 的行
-    # 並抓取 (軸號, ... 之後的最後一組 8 位 HEX
-    pattern = r"\((\d+),2100,00,1814,([0-9a-fA-F]{8})\)"
+    # 存放每個軸最先找到的數據 { "1": "HEX", ... }
+    first_records = {}
+    target_key = "2100,00,1814"
 
     for line in lines:
-        match = re.search(pattern, line)
-        if match:
-            axis_id = match.group(1) # 軸號 (1-6)
-            hex_val = match.group(2) # HEX (00987376 等)
-            
-            # 只紀錄第一次出現的該軸數據 (首筆優先)
-            if axis_id in ["1", "2", "3", "4", "5", "6"] and axis_id not in results:
-                results[axis_id] = hex_val
+        # 尋找包含關鍵字的行
+        if target_key in line and "QsiCoEApi_WriteSlaveSdoObject16" in line:
+            # 正規表示式：抓取括號後的第一個數字(軸號)，以及最後一個逗號後的 8 位 HEX
+            match = re.search(r"\((\d+),.*,([0-9a-fA-F]{8})\)", line)
+            if match:
+                axis_id = match.group(1)
+                hex_val = match.group(2)
+                # 首筆優先：如果該軸還沒紀錄過，才存入
+                if axis_id in ["1", "2", "3", "4", "5", "6"] and axis_id not in first_records:
+                    first_records[axis_id] = hex_val
 
-    if results:
-        st.success(f"解析成功！已找到各軸首筆數據。")
+    if first_records:
+        st.success("✅ 已成功提取各軸首筆數據")
         
-        final_table = []
+        display_list = []
         for i in range(1, 7):
             ax = str(i)
-            h = results.get(ax, "N/A")
+            h = first_records.get(ax, "N/A")
             if h != "N/A":
                 d = int(h, 16)
-                final_table.append({"軸號": f"J{ax}", "十六進制 (HEX)": h, "十進制圈數 (DEC)": f"{d:,}"})
+                display_list.append({"軸號": f"J{ax}", "十六進制 (HEX)": h, "十進制圈數 (DEC)": f"{d:,}"})
             else:
-                final_table.append({"軸號": f"J{ax}", "十六進制 (HEX)": "未找到", "十進制圈數 (DEC)": "-"})
+                display_list.append({"軸號": f"J{ax}", "十六進制 (HEX)": "未找到", "十進制圈數 (DEC)": "-"})
         
-        df = pd.DataFrame(final_table)
+        df = pd.DataFrame(display_list)
         st.table(df)
-        st.download_button("下載 CSV 報表", df.to_csv(index=False).encode('utf-8-sig'), "QECM_Report.csv")
+        st.download_button("📥 下載報表", df.to_csv(index=False).encode('utf-8-sig'), "Report.csv")
     else:
-        st.error("在檔案中找不到關鍵字 2100,00,1814。請確認檔案內容。")
+        st.error("❌ 找不到符合 2100,00,1814 格式的數據，請確認上傳的 Log 是否正確。")
